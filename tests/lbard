@@ -1,0 +1,143 @@
+#!/bin/bash
+
+# Tests for Serval LBARD
+#
+# Copyright 2016 Serval Project, Inc.
+#
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+# 
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+# 
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+
+source "${0%/*}/../serval-dna/testframework.sh"
+source "${0%/*}/../testdefs.sh"
+
+setup() {
+   # Configure four servald daemons without any interfaces connecting them, and
+   # start them running.
+   setup_servald
+   assert_no_servald_processes
+   foreach_instance +A +B +C +D create_single_identity
+   foreach_instance +A +B +C +D start_servald_server
+   get_servald_restful_http_server_port PORTA +A
+   get_servald_restful_http_server_port PORTB +B
+   get_servald_restful_http_server_port PORTC +C
+   get_servald_restful_http_server_port PORTD +D
+   # Start the fake radio daemon.
+   fork %fakeradio fakecsmaradio 4 ttys.txt $1
+   wait_until --timeout=15 eval [ '$(cat ttys.txt | wc -l)' -ge 4 ]
+   tty1=$(sed -n 1p ttys.txt)
+   tty2=$(sed -n 2p ttys.txt)
+   tty3=$(sed -n 3p ttys.txt)
+   tty4=$(sed -n 4p ttys.txt)
+   # Start four lbard daemons.
+   fork %lbardA lbard "$addr_localhost:$PORTA" lbard:lbard "$SIDA" "$tty1" announce pull
+   fork %lbardB lbard "$addr_localhost:$PORTB" lbard:lbard "$SIDB" "$tty2" pull
+   fork %lbardC lbard "$addr_localhost:$PORTC" lbard:lbard "$SIDC" "$tty3" pull
+   fork %lbardD lbard "$addr_localhost:$PORTD" lbard:lbard "$SIDD" "$tty4" pull
+}
+
+configure_servald_server() {
+   # Do not configure any network interfaces.
+   executeOk_servald config \
+      set rhizome.http.enable 1 \
+      set api.restful.users.lbard.password lbard
+}
+
+teardown() {
+   stop_all_servald_servers
+   kill_all_servald_processes
+   assert_no_servald_processes
+   report_all_servald_servers
+}
+
+doc_One="A single very small bundle transfers to peers"
+setup_One() {
+   setup
+   # Insert a file to server A
+   set_instance +A
+   rhizome_add_file file1 50
+}
+test_One() {
+   # Test that the bundle arrives at servers B, C and D
+   all_bundles_received() {
+      bundle_received_by $BID:$VERSION +B &&
+         bundle_received_by $BID:$VERSION +C &&
+         bundle_received_by $BID:$VERSION +D
+   }
+   wait_until all_bundles_received
+}
+
+doc_OneBig="A single larger bundle transfers to peers"
+setup_OneBig() {
+   setup
+   # Insert a file to server A
+   set_instance +A
+   rhizome_add_file file1 50000
+}
+test_OneBig() {
+   # Test that the bundle arrives at servers B, C and D
+   all_bundles_received() {
+      bundle_received_by $BID:$VERSION +B &&
+         bundle_received_by $BID:$VERSION +C &&
+         bundle_received_by $BID:$VERSION +D
+   }
+   wait_until all_bundles_received
+}
+
+doc_All="All peers receive bundles from all other peers"
+setup_All() {
+   setup
+   # Insert a file to server A
+   set_instance +A
+   rhizome_add_file file1 50
+   BIDA=$BID
+   VERSIONA=$VERSION
+   # Insert a file to server B
+   set_instance +B
+   rhizome_add_file file2 51
+   BIDB=$BID
+   VERSIONB=$VERSION
+   # Insert a file to server C
+   set_instance +C
+   rhizome_add_file file3 52
+   BIDC=$BID
+   VERSIONC=$VERSION
+   # Insert a file to server D
+   set_instance +D
+   rhizome_add_file file4 53
+   BIDD=$BID
+   VERSIOND=$VERSION
+}
+test_All() {
+   # Test that the bundle arrives at servers B, C and D
+   all_bundles_received() {
+      bundle_received_by $BIDA:$VERSIONA +B &&
+      bundle_received_by $BIDA:$VERSIONA +C &&
+      bundle_received_by $BIDA:$VERSIONA +D
+
+      bundle_received_by $BIDB:$VERSIONB +A &&
+      bundle_received_by $BIDB:$VERSIONB +C &&
+      bundle_received_by $BIDB:$VERSIONB +D
+
+      bundle_received_by $BIDC:$VERSIONC +A &&
+      bundle_received_by $BIDC:$VERSIONC +B &&
+      bundle_received_by $BIDC:$VERSIONC +D
+
+      bundle_received_by $BIDD:$VERSIOND +A &&
+      bundle_received_by $BIDD:$VERSIOND +B &&
+      bundle_received_by $BIDD:$VERSIOND +C
+   }
+   wait_until all_bundles_received
+}
+
+runTests "$@"

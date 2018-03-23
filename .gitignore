@@ -1,0 +1,8 @@
+.vscode/
+/version.h
+/lbard
+/fakecsmaradio
+/manifesttest
+/echotest
+/*.dSYM
+/testlog
